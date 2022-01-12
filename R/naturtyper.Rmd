@@ -1,0 +1,32 @@
+---
+title: "Indikator: Naturtyper etter Miljødirektoratetsinnstruks - Åpent lavland"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+   
+    
+knit: (function(input_file, encoding) {
+  out_dir <- '../output';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'naturtyperMdir.pdf'))})
+---
+
+
+```{r setup, include=FALSE, message=FALSE}
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(raster)
+library(fasterize)
+library(rgdal)
+library(tmap)
+library(sf)
+library(DT)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Start
+
+
