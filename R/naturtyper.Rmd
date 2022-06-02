@@ -4,7 +4,7 @@ output:
   pdf_document:
     toc: true
     toc_depth: 3
-   
+always_allow_html: true
     
 knit: (function(input_file, encoding) {
   out_dir <- '../output';
@@ -27,6 +27,289 @@ library(DT)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Start
+# Introduction
+This indicator will be based on the field-assess condition of mapped naturetypes according to [Miljødirektoratets Instruks](https://www.miljodirektoratet.no/publikasjoner/2021/februar-2021/kartleggingsinstruks---kartlegging-av-terrestriske-naturtyper-etter-nin2/). We understand that the surveys are not area-representative.
 
 
+
+# Import
+
+The dataset was downloaded from https://karteksport.miljodirektoratet.no/ 12.01.2022
+
+```{r}
+dat <- readOGR(dsn = "../data/Natur_Naturtyper_NiN_50_trondelag_25833.gdb")
+dat <- sf::st_as_sf(dat)
+names(dat)
+```
+
+The indicator is design for use in hovedøkosystem called Åpent lavland. The are multiple relevant nature types, covering both naturally open areas and semi-natural systems.
+
+
+```{r}
+names(dat)[3] <- "Hovedøkosystem"
+unique(dat$Hovedøkosystem)
+```
+Fixing the names a bit...
+```{r}
+dat$Hovedøkosystem[dat$Hovedøkosystem == "Naturlig Ã¥pne omrÃ¥der i lavlandet"] <- "Naturlig åpne områder i lavlandet"
+dat$Hovedøkosystem[dat$Hovedøkosystem == "Naturlig Ã¥pne omrÃ¥der under skoggrensa"] <- "Naturlig åpne områder i lavlandet" # synonym with the above
+```
+
+
+## Subset
+```{r}
+dat2 <- dat[dat$Hovedøkosystem== "Naturlig åpne områder i lavlandet" |
+              dat$Hovedøkosystem== "Semi-naturlig mark", ]
+              
+table(dat2$naturtype, dat2$Hovedøkosystem)
+```
+
+Fix names
+
+```{r}
+dat2$naturtype[dat2$naturtype == "Ã…pen flomfastmark"] <- "Åpen flomfastmark"
+
+dat2$naturtype[dat2$naturtype == "Ã…pen grunnlendt kalkrik mark i boreonemoral sone"] <- "Åpen grunnlendt kalkrik mark i boreonemoral sone"
+
+dat2$naturtype[dat2$naturtype == "Ã…pen grunnlendt kalkrik mark i sÃ¸rboreal sone"] <- "Åpen grunnlendt kalkrik mark i sørboreal sone"
+
+dat2$naturtype[dat2$naturtype == "FossepÃ¥virket berg"] <- "Fossepåvirket berg"
+
+dat2$naturtype[dat2$naturtype == "Nakent tÃ¸rkeutsatt kalkberg"] <- "Nakent tørkeutsatt kalkberg"
+
+dat2$naturtype[dat2$naturtype == "SlÃ¥ttemark"] <- "Slåttemark"
+
+dat2$naturtype[dat2$naturtype == "TÃ¸rt kalkrikt berg i kontinentale omrÃ¥der"] <- "Tørt kalkrikt berg i kontinentale områder"
+
+
+```
+
+
+Close open polygons
+```{r}
+dat2 <- sf::st_make_valid(dat2)
+```
+
+Import outlines of counties
+```{r, eval=F}
+#fylker <- sf::st_read("R:/GeoSpatialData/AdministrativeUnits/Norway_AdministrativeUnits/Converted/Norway_County/Fylke_polygon_2020.shp")
+tro <- fylker[fylker$NAVN == "Trøndelag",]
+st_write(tro, "../data/trondelagOutline.shp")
+```
+
+```{r}
+tro <- st_read("../data/trondelagOutline.shp")
+```
+
+```{r}
+tmap_mode("view")
+```
+
+## Plot on map
+```{r}
+tm_shape(tro)+
+  tm_polygons(alpha=0)+
+tm_shape(dat2,)+
+  tm_polygons(col="naturtype")
+```
+
+
+## Aggregate condition variable
+
+Our indicator variable is called tilstand. We will not evaluate the naturmangfold or kvalitetes variables.
+```{r}
+unique(dat2$tilstand)
+dat2$tilstand[dat2$tilstand == "SvÃ¦rt redusert"] <- "Svært redusert"
+dat2$tilstand[dat2$tilstand == "DÃ¥rlig"] <- "Dårlig"
+# reorder
+dat2$tilstand <- factor(dat2$tilstand, levels = c("Svært redusert", "Dårlig","Moderat", "God"))
+```
+
+
+Calculate the area of each polygon (Naturtyper)
+```{r}
+dat2$area <- st_area(dat2)
+```
+
+Calculate the total area for each nature type in Åpent lavland
+```{r}
+dat3 <- aggregate(data = dat2,
+                  area~tilstand+naturtype+Hovedøkosystem,
+                  FUN = sum)
+
+# convert to km2
+dat3$area2 <- as.numeric(dat3$area/1000000)
+```
+
+```{r, fig.width=15}
+(areal <- ggplot(data = dat3)+
+  geom_bar(aes(x = naturtype, 
+               y = area2,
+               group = tilstand,
+               fill = tilstand),
+           stat = "sum",
+           colour="black", size=1)+
+  theme_bw(base_size = 20)+
+  xlab("")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ylab(bquote("Areal " (km^-2)))+
+   theme(legend.position = "right")+
+   coord_flip()
+)
+```
+
+```{r, eval=F}
+png("../output/naturtyperTilstand.png", 
+    units="in", width=12, height=7, res=300)
+areal
+dev.off()
+```
+
+###Combine all nature types
+```{r}
+dat4 <- aggregate(data = dat3,
+                  area2~tilstand,
+                  FUN = sum)
+```
+
+```{r, fig.width=5, fig.height=8}
+(arealComb <- ggplot(data = dat4)+
+  geom_bar(aes(x = tilstand, 
+               y = area2
+               ),
+           stat = "sum",
+           colour="black", 
+           fill="grey",
+           size=1)+
+  theme_bw(base_size = 20)+
+  xlab("")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+  ylab(bquote("Areal " (km^-2)))+
+   theme(legend.position = "right")
+)
+```
+
+
+```{r, eval=F}
+png("../output/naturtyperTilstandCombined.png", 
+    units="in", width=5, height=7, res=300)
+arealComb
+dev.off()
+```
+
+
+## Semi-natural ecosystems only
+```{r}
+sem <- dat3[dat3$Hovedøkosystem== "Semi-naturlig mark", ]
+unique(sem$naturtype)
+```
+
+Number two here (NiN type T40) is not semi-natural
+
+```{r}
+sem <- sem[sem$naturtype!= "Eng-aktig sterkt endret fastmark", ]
+```
+
+### English terms
+
+```{r}
+sem$naturtypeEnglish <- NA
+sem$naturtypeEnglish[sem$naturtype == "Boreal hei"] <- "Boreal heathland"
+sem$naturtypeEnglish[sem$naturtype == "Hagemark"]   <- "Sparesly wooded and grazed meadow"
+sem$naturtypeEnglish[sem$naturtype == "Kystlynghei"]  <- "Coastal heathland"
+sem$naturtypeEnglish[sem$naturtype == "Naturbeitemark"] <- "Grazed meadow"
+sem$naturtypeEnglish[sem$naturtype == "Semi-naturlig eng"] <- "Semi-natural grasslands"
+sem$naturtypeEnglish[sem$naturtype == "Semi-naturlig strandeng"] <- "Semi-natural salt marshes"
+sem$naturtypeEnglish[sem$naturtype == "Slåttemark"] <- "Hay meadow"
+unique(sem$naturtypeEnglish)
+```
+```{r}
+unique(sem$tilstand)
+sem$tilstandEnglish <- NA
+sem$tilstandEnglish[sem$tilstand=="Svært redusert"] <- "Very reduced"
+sem$tilstandEnglish[sem$tilstand=="Dårlig"] <- "Poor"
+sem$tilstandEnglish[sem$tilstand=="Moderat"] <- "Moderate"
+sem$tilstandEnglish[sem$tilstand=="God"] <- "Good"
+
+```
+
+
+```{r, fig.width=15}
+(arealSem <- ggplot(data = sem)+
+  geom_bar(aes(x = naturtypeEnglish, 
+               y = area2,
+               group = tilstandEnglish,
+               fill = tilstandEnglish),
+           stat = "sum",
+           colour="black", size=1)+
+  theme_bw(base_size = 20)+
+  xlab("")+
+  ylab(bquote("Area " (km^-2)))+
+   theme(legend.position = "right")+
+   coord_flip()+
+   guides(fill=guide_legend(title="Condition"))
+)
+```
+```{r, eval=F}
+png("../output/naturtyperTilstandSemiNaturalTypes.png", 
+    units="in", width=15, height=7, res=300)
+arealSem
+dev.off()
+```
+
+```{r}
+semComb <- aggregate(data = sem,
+                     area2~tilstandEnglish,
+                     FUN = sum)
+semComb$eco <- "Semi-natural ecosystems"
+```
+
+
+```{r, fig.width=15, fig.height=3}
+(arealSemComb <- ggplot(data = semComb)+
+  geom_bar(aes(x = eco, 
+               y = area2,
+               fill = tilstandEnglish),
+           stat = "sum",
+           colour="black", size=1,
+           position="fill")+
+  theme_bw(base_size = 20)+
+  xlab("")+
+  ylab("Proportion")+
+   theme(legend.position = "right")+
+   coord_flip()+
+   guides(fill=guide_legend(title="Condition"))
+)
+```
+
+
+```{r, eval=F}
+png("../output/naturtyperTilstandCombinedProportionSemiNaturalTypes.png", 
+    units="in", width=15, height=3, res=300)
+arealSemComb
+dev.off()
+```
+
+```{r, fig.width=5, fig.height=5}
+(arealSemComb2 <- ggplot(data = semComb)+
+  geom_bar(aes(x = tilstandEnglish, 
+               y = area2
+               ),
+           stat = "sum",
+           colour="black", 
+           size=1,
+           fill = "grey")+
+  theme_bw(base_size = 20)+
+  xlab("")+
+  ylab(bquote("Area " (km^-2)))+
+   theme(legend.position = "right")+
+   guides(fill=guide_legend(title="Condition"))
+)
+```
+
+```{r, eval=F}
+png("../output/naturtyperTilstandCombinedSemiNaturalTypes.png", 
+    units="in", width=7, height=7, res=300)
+arealSemComb2
+dev.off()
+```
